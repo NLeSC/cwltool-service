@@ -1,3 +1,4 @@
+import connexion
 from flask import Flask, Response, request, redirect
 import os
 import subprocess
@@ -10,10 +11,10 @@ import threading
 import time
 import copy
 
-app = Flask(__name__)
 
 jobs_lock = threading.Lock()
 jobs = []
+
 
 class Job(threading.Thread):
     def __init__(self, jobid, path, inputobj):
@@ -76,8 +77,8 @@ class Job(threading.Thread):
                 self.status["state"] = "Running"
 
 
-@app.route("/run", methods=['POST'])
-def runworkflow():
+
+def postJob():
     path = request.args["wf"]
     with jobs_lock:
         jobid = len(jobs)
@@ -87,8 +88,8 @@ def runworkflow():
     return redirect("/jobs/%i" % jobid, code=303)
 
 
-@app.route("/jobs/<int:jobid>", methods=['GET', 'POST'])
-def jobcontrol(jobid):
+
+def getJobById(jobid):
     with jobs_lock:
         job = jobs[jobid]
     if request.method == 'POST':
@@ -117,14 +118,14 @@ def logspooler(job):
                         break
                 time.sleep(1)
 
-@app.route("/jobs/<int:jobid>/log", methods=['GET'])
-def getlog(jobid):
+
+def getJobLogById(jobid):
     with jobs_lock:
         job = jobs[jobid]
     return Response(logspooler(job))
 
-@app.route("/jobs", methods=['GET'])
-def getjobs():
+
+def getJobs():
     with jobs_lock:
         jobscopy = copy.copy(jobs)
     def spool(jc):
@@ -139,6 +140,19 @@ def getjobs():
         yield "]"
     return Response(spool(jobscopy))
 
+
+def deleteJobById(jobId):
+    raise NotImplemented()
+
+
+def cancelJobById(jobId):
+    raise NotImplemented()
+
+
+app = Flask(__name__)
+app = connexion.App(__name__, specification_dir='workflow-execution-schemas/src/main/resources/swagger/')
+app.add_api('ga4gh-workflow-execution.yaml', resolver=lambda operation_id: globals()[operation_id])
+
 if __name__ == "__main__":
-    #app.debug = True
+    app.debug = True
     app.run()

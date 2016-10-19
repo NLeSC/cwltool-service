@@ -13,7 +13,7 @@ README = os.path.join(SETUP_DIR, 'README')
 setup(name='cwltool_service',
       version='2.0',
       description='Common workflow language runner service',
-      long_description=open(README).read(),
+      long_description=open('README.md').read(),
       author='Common workflow language working group',
       author_email='common-workflow-language@googlegroups.com',
       url="https://github.com/common-workflow-language/cwltool-service",
@@ -21,7 +21,7 @@ setup(name='cwltool_service',
       license='Apache 2.0',
       py_modules=["cwltool_stream", "cwl_flask", "cwltool_client"],
       install_requires=[
-          'Flask',
+          'connexion',
           'requests',
           'PyYAML'
         ],
