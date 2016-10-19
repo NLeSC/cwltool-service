@@ -1,0 +1,4 @@
+[submodule "workflow-execution-schemas"]
+	path = workflow-execution-schemas
+	url = https://github.com/NLeSC/workflow-execution-schemas.git
+	branch = workflow-execution-openapi
