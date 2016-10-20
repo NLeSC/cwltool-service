@@ -17,11 +17,12 @@ jobs = []
 
 
 class Job(threading.Thread):
-    def __init__(self, jobid, path, inputobj):
+    def __init__(self, jobid, path, inputobj, name=''):
         super(Job, self).__init__()
         self.jobid = jobid
         self.path = path
         self.inputobj = inputobj
+        self.name = name
         self.updatelock = threading.Lock()
         self.begin()
 
@@ -29,22 +30,28 @@ class Job(threading.Thread):
         loghandle, self.logname = tempfile.mkstemp()
         with self.updatelock:
             self.outdir = tempfile.mkdtemp()
-            self.proc = subprocess.Popen(["cwl-runner", self.path, "-"],
-                                         stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE,
-                                         stderr=loghandle,
-                                         close_fds=True,
-                                         cwd=self.outdir)
             self.status = {
-                "id": "%sjobs/%i" % (request.url_root, self.jobid),
-                "log": "%sjobs/%i/log" % (request.url_root, self.jobid),
-                "run": self.path,
+                "id": "%sjobs/%s" % (request.url_root, self.jobid),
+                "log": "%sjobs/%s/log" % (request.url_root, self.jobid),
+                "workflow": self.path,
                 "state": "Running",
-                "input": json.loads(self.inputobj),
-                "output": None}
+                "input": self.inputobj,
+                "output": None,
+                "name": self.name}
+            try:
+                self.proc = subprocess.Popen(["cwl-runner", self.path, "-"],
+                                             stdin=subprocess.PIPE,
+                                             stdout=subprocess.PIPE,
+                                             stderr=loghandle,
+                                             close_fds=True,
+                                             cwd=self.outdir)
+            except OSError:
+                self.status["state"] = "SystemError"
+
+
 
     def run(self):
-        self.stdoutdata, self.stderrdata = self.proc.communicate(self.inputobj)
+        self.stdoutdata, self.stderrdata = self.proc.communicate(json.dumps(self.inputobj))
         if self.proc.returncode == 0:
             outobj = yaml.load(self.stdoutdata)
             with self.updatelock:
@@ -52,7 +59,7 @@ class Job(threading.Thread):
                 self.status["output"] = outobj
         else:
             with self.updatelock:
-                self.status["state"] = "Failed"
+                self.status["state"] = "PermanentFailure"
 
     def getstatus(self):
         with self.updatelock:
@@ -62,7 +69,7 @@ class Job(threading.Thread):
         if self.status["state"] == "Running":
             self.proc.send_signal(signal.SIGQUIT)
             with self.updatelock:
-                self.status["state"] = "Canceled"
+                self.status["state"] = "Cancelled"
 
     def pause(self):
         if self.status["state"] == "Running":
@@ -78,32 +85,26 @@ class Job(threading.Thread):
 
 
 
-def postJob():
-    path = request.args["wf"]
+def postJob(body):
+    path = body['workflow']
+    inputobj = body.get('input', {})
+    name = body.get('name', '')
     with jobs_lock:
         jobid = len(jobs)
-        job = Job(jobid, path, request.stream.read())
+        job = Job(str(jobid), path, inputobj, name)
         job.start()
         jobs.append(job)
     return redirect("/jobs/%i" % jobid, code=303)
 
 
 
-def getJobById(jobid):
+def getJobById(jobId):
     with jobs_lock:
-        job = jobs[jobid]
-    if request.method == 'POST':
-        action = request.args.get("action")
-        if action:
-            if action == "cancel":
-                job.cancel()
-            elif action == "pause":
-                job.pause()
-            elif action == "resume":
-                job.resume()
-
-    status = job.getstatus()
-    return json.dumps(status, indent=4), 200, ""
+        try:
+            job = jobs[int(jobId)]
+        except IndexError:
+            return 'Not Found', 404
+    return job.getstatus()
 
 
 def logspooler(job):
@@ -119,9 +120,12 @@ def logspooler(job):
                 time.sleep(1)
 
 
-def getJobLogById(jobid):
+def getJobLogById(jobId):
     with jobs_lock:
-        job = jobs[jobid]
+        try:
+            job = jobs[int(jobId)]
+        except IndexError:
+            return 'Not Found', 404
     return Response(logspooler(job))
 
 
@@ -142,11 +146,25 @@ def getJobs():
 
 
 def deleteJobById(jobId):
-    raise NotImplemented()
+    with jobs_lock:
+        try:
+            job = jobs[int(jobId)]
+        except IndexError:
+            return 'Not Found', 404
+    status = job.getstatus()
+    if status in ('Running', 'Waiting'):
+        job.cancel()
+    del jobs[int(jobId)]
 
 
 def cancelJobById(jobId):
-    raise NotImplemented()
+    with jobs_lock:
+        try:
+            job = jobs[int(jobId)]
+        except IndexError:
+            return 'Not Found', 404
+    job.cancel()
+    return job.getstatus()
 
 
 app = Flask(__name__)
