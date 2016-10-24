@@ -155,6 +155,7 @@ def deleteJobById(jobId):
     if status in ('Running', 'Waiting'):
         job.cancel()
     del jobs[int(jobId)]
+    return None, 204
 
 
 def cancelJobById(jobId):
